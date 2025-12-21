@@ -14,7 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/${payment.api-version:v1}/payments")
+@RequestMapping("/api/v1/payments")
 public class PaymentController {
     
     private static final String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
