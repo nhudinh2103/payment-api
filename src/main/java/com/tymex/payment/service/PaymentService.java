@@ -10,8 +10,8 @@ import com.tymex.payment.exception.PaymentException;
 import com.tymex.payment.exception.RequestInProgressException;
 import com.tymex.payment.repository.PaymentRequestRepository;
 import com.tymex.payment.service.provider.ExternalPaymentProvider;
-import com.tymex.payment.util.HashUtil;
 import com.tymex.payment.util.IdempotencyKeyValidator;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -83,7 +83,7 @@ public class PaymentService {
 
             // Serialize request and calculate hash
             String requestBody = jsonSerializationService.serializeRequest(request);
-            String requestHash = HashUtil.calculateSha256(requestBody);
+            String requestHash = DigestUtils.sha256Hex(requestBody);
 
             // Transaction 1: Create PENDING record (SHORT - 10ms)
             PaymentRequest record = createPendingRecord(idempotencyKey, requestHash, requestBody, request);
@@ -395,7 +395,7 @@ public class PaymentService {
             // Step 2: Calculate webhook payload hash (for potential future validation)
             // Note: Currently we rely on status check for idempotency, but hash is calculated
             // for consistency with processPayment() pattern
-            String webhookHash = HashUtil.calculateSha256(webhookPayload);
+            String webhookHash = DigestUtils.sha256Hex(webhookPayload);
             log.debug("Webhook hash calculated: idempotencyKey={}, hash={}", idempotencyKey, webhookHash);
             
             // Step 3 & 4: Check for existing record and validate duplicate webhooks
