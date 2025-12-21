@@ -1,6 +1,7 @@
 package com.tymex.payment.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.tymex.payment.enums.PaymentProvider;
 import com.tymex.payment.enums.PaymentStatus;
 
 import java.math.BigDecimal;
@@ -14,6 +15,8 @@ public record PaymentResponseDTO(
     String paymentMethod,
     String description,
     LocalDateTime createdAt,
+    PaymentProvider paymentProvider,
+    String providerTransactionId,
     String idempotencyKey,
     boolean cached
 ) {
@@ -21,12 +24,13 @@ public record PaymentResponseDTO(
      * Factory method to create PaymentResponseDTO without optional fields.
      * Useful when idempotencyKey is set later. Cached defaults to false.
      * 
-     * @param transactionNo the transaction number
+     * @param transactionNo the transaction number (from external provider)
      * @param status the payment status
      * @param amount the payment amount
      * @param paymentMethod the payment method
      * @param description the payment description
      * @param createdAt the creation timestamp
+     * @param paymentProvider the payment provider used
      * @return PaymentResponseDTO with idempotencyKey set to null and cached set to false
      */
     public static PaymentResponseDTO of(
@@ -35,7 +39,8 @@ public record PaymentResponseDTO(
             BigDecimal amount,
             String paymentMethod,
             String description,
-            LocalDateTime createdAt) {
+            LocalDateTime createdAt,
+            PaymentProvider paymentProvider) {
         return new PaymentResponseDTO(
             transactionNo,
             status,
@@ -43,7 +48,46 @@ public record PaymentResponseDTO(
             paymentMethod,
             description,
             createdAt,
-            null,
+            paymentProvider,
+            null,  // providerTransactionId (null for sync providers)
+            null,  // idempotencyKey
+            false  // Default to not cached
+        );
+    }
+    
+    /**
+     * Factory method to create PaymentResponseDTO with provider transaction ID.
+     * Used for asynchronous providers that return a provider transaction ID.
+     * 
+     * @param transactionNo the transaction number (from external provider, may be null for async)
+     * @param status the payment status
+     * @param amount the payment amount
+     * @param paymentMethod the payment method
+     * @param description the payment description
+     * @param createdAt the creation timestamp
+     * @param paymentProvider the payment provider used
+     * @param providerTransactionId the provider's transaction ID (for webhook lookup)
+     * @return PaymentResponseDTO with providerTransactionId set
+     */
+    public static PaymentResponseDTO of(
+            String transactionNo,
+            PaymentStatus status,
+            BigDecimal amount,
+            String paymentMethod,
+            String description,
+            LocalDateTime createdAt,
+            PaymentProvider paymentProvider,
+            String providerTransactionId) {
+        return new PaymentResponseDTO(
+            transactionNo,
+            status,
+            amount,
+            paymentMethod,
+            description,
+            createdAt,
+            paymentProvider,
+            providerTransactionId,
+            null,  // idempotencyKey
             false  // Default to not cached
         );
     }
@@ -63,6 +107,8 @@ public record PaymentResponseDTO(
             paymentMethod,
             description,
             createdAt,
+            paymentProvider,
+            providerTransactionId,
             idempotencyKey,
             cached
         );

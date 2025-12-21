@@ -4,10 +4,12 @@ import com.tymex.payment.dto.PaymentRequestDTO;
 import com.tymex.payment.dto.PaymentResponseDTO;
 import com.tymex.payment.entity.PaymentRequest;
 import com.tymex.payment.enums.ErrorCode;
+import com.tymex.payment.enums.PaymentStatus;
 import com.tymex.payment.exception.IdempotencyKeyConflictException;
 import com.tymex.payment.exception.PaymentException;
 import com.tymex.payment.exception.RequestInProgressException;
 import com.tymex.payment.repository.PaymentRequestRepository;
+import com.tymex.payment.service.provider.ExternalPaymentProvider;
 import com.tymex.payment.util.HashUtil;
 import com.tymex.payment.util.IdempotencyKeyValidator;
 import org.slf4j.Logger;
@@ -94,10 +96,10 @@ public class PaymentService {
                 return new ProcessPaymentResult(cachedResponse, true);
             }
 
-            // NO TRANSACTION: Call external provider (LONG - 10s)
+            // NO TRANSACTION: Call external provider (LONG - 10s for sync, immediate for async)
             PaymentResponseDTO response;
             try {
-                response = externalPaymentProvider.charge(request);
+                response = externalPaymentProvider.charge(request, idempotencyKey);
 
             } catch (PaymentException e) {
                 // Transaction 2: Update to FAILED (SHORT - 10ms)
@@ -105,8 +107,16 @@ public class PaymentService {
                 throw e;
             }
 
-            // Transaction 3: Update to COMPLETED (SHORT - 10ms)
-            updateRecordCompleted(record, response);
+            // Transaction 3: Update record based on response status
+            // For synchronous providers: Update to COMPLETED
+            // For asynchronous providers (PENDING): Update to PROCESSING (keep processing, don't complete yet)
+            if (response.status() == PaymentStatus.PENDING) {
+                // Async provider - store provider transaction ID and keep as PROCESSING
+                updateRecordPending(record, response);
+            } else {
+                // Sync provider - update to COMPLETED
+                updateRecordCompleted(record, response);
+            }
 
             return new ProcessPaymentResult(response, false);
         }
@@ -125,6 +135,7 @@ public class PaymentService {
                 record.setAmount(request.amount());
                 record.setPaymentMethod(request.paymentMethod());
                 record.setDescription(request.description());
+                record.setPaymentProvider(request.paymentProvider());
                 record.setExpiresAt(LocalDateTime.now().plusHours(24));
 
                 repository.save(record); // INSERT
@@ -205,6 +216,7 @@ public class PaymentService {
                 existing.setAmount(request.amount());
                 existing.setPaymentMethod(request.paymentMethod());
                 existing.setDescription(request.description());
+                existing.setPaymentProvider(request.paymentProvider());
                 existing.setExpiresAt(LocalDateTime.now().plusHours(24));
                 repository.save(existing);
                 return existing;
@@ -231,11 +243,13 @@ public class PaymentService {
                 existing.setAmount(request.amount());
                 existing.setPaymentMethod(request.paymentMethod());
                 existing.setDescription(request.description());
+                existing.setPaymentProvider(request.paymentProvider());
                 existing.setExpiresAt(LocalDateTime.now().plusHours(24));
                 // Clear previous response data
                 existing.setResponseStatus(null);
                 existing.setResponseBody(null);
                 existing.setTransactionNo(null);
+                existing.setPaymentProvider(null);
                 existing.setPaymentStatus(null);
                 repository.save(existing);
 
@@ -294,11 +308,27 @@ public class PaymentService {
         }
 
         @Transactional
+        private void updateRecordPending(PaymentRequest record, PaymentResponseDTO response) {
+            // For async providers: Keep as PROCESSING, store provider transaction ID for webhook lookup
+            record.setResponseBody(jsonSerializationService.serializeResponse(response));
+            record.setResponseStatus(HttpStatus.ACCEPTED.value());  // 202 Accepted for async processing
+            record.setProviderTransactionId(response.providerTransactionId());
+            record.setPaymentProvider(response.paymentProvider());
+            record.setPaymentStatus(response.status().getValue());
+            // Keep processingStatus as PROCESSING (don't change to COMPLETED)
+            repository.save(record); // UPDATE
+            log.debug("Updated record for async payment (PENDING): idempotencyKey={}, providerTransactionId={}", 
+                     record.getIdempotencyKey(), response.providerTransactionId());
+        }
+
+        @Transactional
         private void updateRecordCompleted(PaymentRequest record, PaymentResponseDTO response) {
             record.setProcessingStatus(PaymentRequest.ProcessingStatus.COMPLETED);
             record.setResponseBody(jsonSerializationService.serializeResponse(response));
             record.setResponseStatus(HttpStatus.OK.value());
             record.setTransactionNo(response.transactionNo());
+            record.setProviderTransactionId(response.providerTransactionId());  // May be null for sync providers
+            record.setPaymentProvider(response.paymentProvider());
             record.setPaymentStatus(response.status().getValue());
             repository.save(record); // UPDATE
             log.debug("Updated record to COMPLETED for idempotency key: {}", record.getIdempotencyKey());
@@ -327,5 +357,131 @@ public class PaymentService {
             }
 
             return jsonSerializationService.deserializeResponse(record.getResponseBody());
+        }
+
+        /**
+         * Processes webhook callback with idempotency logic (similar to processPayment).
+         * Used for asynchronous payment providers (e.g., MoMo) that send webhooks.
+         * 
+         * Webhook idempotency flow (similar to processPayment):
+         * 1. Look up payment by provider_transaction_id to get the actual idempotency_key
+         * 2. Calculate webhook payload hash
+         * 3. Check for existing record by idempotency_key
+         * 4. Validate webhook hash (if record exists, ensure it matches)
+         * 5. Handle duplicate webhooks (if already COMPLETED/FAILED, return early)
+         * 6. Update payment status if still in PROCESSING
+         * 
+         * @param providerTransactionId the provider's transaction ID (used as idempotency key for webhooks)
+         * @param webhookPayload the webhook payload (JSON string) for hash validation
+         * @param transactionNo the final transaction number (from webhook, may be null if failed)
+         * @param status the payment status (COMPLETED or FAILED)
+         * @throws IllegalArgumentException if payment not found
+         */
+        @Retryable(
+            retryFor = {ObjectOptimisticLockingFailureException.class},
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 100, multiplier = 2)
+        )
+        @Transactional
+        public void processWebhook(String providerTransactionId, String webhookPayload, 
+                                   String transactionNo, PaymentStatus status) {
+            // Step 1: Look up payment by provider_transaction_id to get the actual idempotency_key
+            PaymentRequest record = repository.findByProviderTransactionId(providerTransactionId)
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Payment not found for providerTransactionId: " + providerTransactionId));
+            
+            String idempotencyKey = record.getIdempotencyKey();
+            
+            // Step 2: Calculate webhook payload hash (for potential future validation)
+            // Note: Currently we rely on status check for idempotency, but hash is calculated
+            // for consistency with processPayment() pattern
+            String webhookHash = HashUtil.calculateSha256(webhookPayload);
+            log.debug("Webhook hash calculated: idempotencyKey={}, hash={}", idempotencyKey, webhookHash);
+            
+            // Step 3 & 4: Check for existing record and validate duplicate webhooks
+            // For webhooks, we validate that the payment is in PROCESSING status
+            // If already COMPLETED/FAILED, this is a duplicate webhook
+            if (record.getProcessingStatus() == PaymentRequest.ProcessingStatus.COMPLETED) {
+                log.info("Webhook ignored - payment already completed: idempotencyKey={}, providerTransactionId={}",
+                        idempotencyKey, providerTransactionId);
+                return;  // Already processed, ignore duplicate webhook
+            }
+            
+            if (record.getProcessingStatus() == PaymentRequest.ProcessingStatus.FAILED) {
+                log.info("Webhook ignored - payment already failed: idempotencyKey={}, providerTransactionId={}",
+                        idempotencyKey, providerTransactionId);
+                return;  // Already processed, ignore duplicate webhook
+            }
+            
+            // Step 5: Validate that payment is in PROCESSING status (expected for async payments)
+            if (record.getProcessingStatus() != PaymentRequest.ProcessingStatus.PROCESSING) {
+                log.warn("Webhook ignored - payment not in PROCESSING status: idempotencyKey={}, currentStatus={}, providerTransactionId={}",
+                        idempotencyKey, record.getProcessingStatus(), providerTransactionId);
+                return;
+            }
+            
+            // Step 6: Update payment status
+            if (status == PaymentStatus.COMPLETED) {
+                record.setProcessingStatus(PaymentRequest.ProcessingStatus.COMPLETED);
+                record.setTransactionNo(transactionNo);
+                record.setPaymentStatus(PaymentStatus.COMPLETED.getValue());
+                record.setResponseStatus(HttpStatus.OK.value());
+                
+                // Update response body with final status
+                PaymentResponseDTO finalResponse = PaymentResponseDTO.of(
+                        transactionNo,
+                        PaymentStatus.COMPLETED,
+                        record.getAmount(),
+                        record.getPaymentMethod(),
+                        record.getDescription(),
+                        LocalDateTime.now(),
+                        record.getPaymentProvider()
+                );
+                record.setResponseBody(jsonSerializationService.serializeResponse(finalResponse));
+                
+                log.info("Webhook: Payment completed - idempotencyKey={}, transactionNo={}, providerTransactionId={}",
+                        idempotencyKey, transactionNo, providerTransactionId);
+            } else if (status == PaymentStatus.FAILED) {
+                record.setProcessingStatus(PaymentRequest.ProcessingStatus.FAILED);
+                record.setPaymentStatus(PaymentStatus.FAILED.getValue());
+                record.setResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR.value());
+                
+                // Update response body with failure status
+                PaymentResponseDTO failedResponse = PaymentResponseDTO.of(
+                        null,
+                        PaymentStatus.FAILED,
+                        record.getAmount(),
+                        record.getPaymentMethod(),
+                        record.getDescription(),
+                        LocalDateTime.now(),
+                        record.getPaymentProvider()
+                );
+                record.setResponseBody(jsonSerializationService.serializeResponse(failedResponse));
+                
+                log.info("Webhook: Payment failed - idempotencyKey={}, providerTransactionId={}",
+                        idempotencyKey, providerTransactionId);
+            } else {
+                log.warn("Webhook: Unexpected status {} for providerTransactionId={}", status, providerTransactionId);
+                return;
+            }
+
+            repository.save(record);
+            log.debug("Webhook update completed for providerTransactionId={}", providerTransactionId);
+        }
+        
+        /**
+         * @deprecated Use processWebhook() instead. This method is kept for backward compatibility.
+         * Updates payment status from webhook callback (legacy method without idempotency hash validation).
+         */
+        @Deprecated
+        @Retryable(
+            retryFor = {ObjectOptimisticLockingFailureException.class},
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 100, multiplier = 2)
+        )
+        @Transactional
+        public void updatePaymentFromWebhook(String providerTransactionId, String transactionNo, PaymentStatus status) {
+            // Delegate to processWebhook with empty payload (no hash validation)
+            processWebhook(providerTransactionId, "", transactionNo, status);
         }
 }

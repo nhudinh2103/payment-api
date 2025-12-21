@@ -1,5 +1,6 @@
 package com.tymex.payment.dto;
 
+import com.tymex.payment.enums.PaymentProvider;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -14,5 +15,8 @@ public record PaymentRequestDTO(
     @NotBlank(message = "Payment method is required")
     String paymentMethod,
     
-    String description
+    String description,
+    
+    @NotNull(message = "Payment provider is required")
+    PaymentProvider paymentProvider
 ) {}

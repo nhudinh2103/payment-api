@@ -1,5 +1,6 @@
 package com.tymex.payment.entity;
 
+import com.tymex.payment.enums.PaymentProvider;
 import jakarta.persistence.*;
 
 import java.math.BigDecimal;
@@ -39,6 +40,13 @@ public class PaymentRequest {
     
     @Column(name = "transaction_no", length = 36)
     private String transactionNo;
+    
+    @Column(name = "provider_transaction_id", length = 100)
+    private String providerTransactionId;
+    
+    @Column(name = "payment_provider", length = 50)
+    @Enumerated(EnumType.STRING)
+    private PaymentProvider paymentProvider;
     
     @Column(name = "amount", precision = 19, scale = 4)
     private BigDecimal amount;
@@ -153,6 +161,22 @@ public class PaymentRequest {
     
     public void setTransactionNo(String transactionNo) {
         this.transactionNo = transactionNo;
+    }
+    
+    public String getProviderTransactionId() {
+        return providerTransactionId;
+    }
+    
+    public void setProviderTransactionId(String providerTransactionId) {
+        this.providerTransactionId = providerTransactionId;
+    }
+    
+    public PaymentProvider getPaymentProvider() {
+        return paymentProvider;
+    }
+    
+    public void setPaymentProvider(PaymentProvider paymentProvider) {
+        this.paymentProvider = paymentProvider;
     }
     
     public BigDecimal getAmount() {
