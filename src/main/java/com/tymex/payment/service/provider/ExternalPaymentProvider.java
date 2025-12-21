@@ -4,6 +4,7 @@ import com.tymex.payment.dto.PaymentRequestDTO;
 import com.tymex.payment.dto.PaymentResponseDTO;
 import com.tymex.payment.enums.PaymentProvider;
 import com.tymex.payment.service.provider.contract.PaymentProviderStrategy;
+import com.tymex.payment.service.provider.contract.WebhookCapablePaymentProviderStrategy;
 import com.tymex.payment.service.provider.routing.PaymentProviderRouter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,10 +46,10 @@ public class ExternalPaymentProvider {
         PaymentProviderStrategy strategy = router.route(provider);
         
         // Log whether provider is synchronous or asynchronous
-        if (strategy.isSynchronous()) {
-            log.debug("Using synchronous flow for provider: {}", provider);
-        } else {
+        if (strategy instanceof WebhookCapablePaymentProviderStrategy) {
             log.debug("Using asynchronous flow for provider: {}", provider);
+        } else {
+            log.debug("Using synchronous flow for provider: {}", provider);
         }
         
         // Delegate to provider strategy

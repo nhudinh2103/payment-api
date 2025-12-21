@@ -27,20 +27,5 @@ public interface PaymentProviderStrategy {
      * @return PaymentResponseDTO with payment result (or PENDING for async providers)
      */
     PaymentResponseDTO initiatePayment(PaymentRequestDTO request, String idempotencyKey);
-    
-    /**
-     * Whether this provider uses synchronous or asynchronous payment flow.
-     * 
-     * Purpose:
-     * - PaymentService can use this to determine if it should wait for response
-     * - Useful for logging and debugging
-     * - Can be used to determine if webhook polling is needed
-     * 
-     * Note: This can also be inferred from the response status (PENDING = async),
-     * but having explicit method provides type safety and clarity.
-     * 
-     * @return true if synchronous (waits for response), false if asynchronous (returns immediately)
-     */
-    boolean isSynchronous();
 }
 

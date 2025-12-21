@@ -65,13 +65,6 @@ public class StripePaymentProvider implements PaymentProviderStrategy {
                  transactionNo, status);
         return response;
     }
-    
-    @Override
-    public boolean isSynchronous() {
-        return true;  // Stripe is synchronous - waits for response
-    }
-    
-    // No need to override handleWebhook() - default no-op implementation from interface is sufficient
     // Stripe is synchronous and doesn't use webhooks for payment initiation
     
     /**

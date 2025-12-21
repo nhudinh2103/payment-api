@@ -30,12 +30,15 @@ public class PaymentProviderRouter {
         );
         
         // Build webhook handler map (only webhook-capable providers)
-        // Capability is determined at construction time, not at runtime
+        // All providers implement PaymentProviderStrategy, so we can check from strategies map
+        // Only async providers implement WebhookCapablePaymentProviderStrategy interface
         this.webhookHandlers = new HashMap<>();
-        if (momoProvider instanceof WebhookCapablePaymentProviderStrategy) {
-            webhookHandlers.put(PaymentProvider.MOMO, (WebhookCapablePaymentProviderStrategy) momoProvider);
+        for (Map.Entry<PaymentProvider, PaymentProviderStrategy> entry : strategies.entrySet()) {
+            PaymentProviderStrategy strategy = entry.getValue();
+            if (strategy instanceof WebhookCapablePaymentProviderStrategy) {
+                webhookHandlers.put(entry.getKey(), (WebhookCapablePaymentProviderStrategy) strategy);
+            }
         }
-        // Stripe doesn't implement WebhookCapablePaymentProvider, so not added to map
     }
     
     /**

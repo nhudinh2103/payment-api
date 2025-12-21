@@ -80,11 +80,6 @@ public class MoMoPaymentProvider implements PaymentProviderStrategy, WebhookCapa
     }
     
     @Override
-    public boolean isSynchronous() {
-        return false;  // MoMo is asynchronous - returns immediately, result via webhook
-    }
-    
-    @Override
     @Transactional
     public void handleWebhook(String payload, Map<String, String> headers) {
         // Verify webhook signature (in real implementation)
