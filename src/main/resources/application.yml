@@ -1,0 +1,38 @@
+spring:
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:h2}
+  
+  datasource:
+    url: jdbc:h2:mem:paymentdb;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+    
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: ${payment.debug.sql-logging:false}
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+        jdbc:
+          query_timeout: 30
+        format_sql: ${payment.debug.sql-logging:false}
+          
+  transaction:
+    default-timeout: 30
+
+payment:
+  api:
+    key: ${API_KEY:your-secret-key-here}
+  api-version: ${API_VERSION:v1}
+  idempotency:
+    ttl-hours: 24
+    stuck-threshold-minutes: 5
+    cleanup-interval-minutes: 5
+  debug:
+    sql-logging: ${SQL_LOGGING_ENABLED:false}
+
+server:
+  port: 8080
+

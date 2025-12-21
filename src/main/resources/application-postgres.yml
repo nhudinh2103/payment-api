@@ -1,0 +1,18 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/paymentdb
+    driver-class-name: org.postgresql.Driver
+    username: ${DB_USERNAME:payment_user}
+    password: ${DB_PASSWORD:payment_pass}
+    
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: ${payment.debug.sql-logging:false}
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          query_timeout: 30
+        format_sql: ${payment.debug.sql-logging:false}
+
