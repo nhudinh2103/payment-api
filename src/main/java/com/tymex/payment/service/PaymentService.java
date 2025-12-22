@@ -11,6 +11,7 @@ import com.tymex.payment.exception.RequestInProgressException;
 import com.tymex.payment.repository.PaymentRequestRepository;
 import com.tymex.payment.service.provider.ExternalPaymentProvider;
 import com.tymex.payment.util.IdempotencyKeyValidator;
+import com.tymex.payment.util.RetryUtil;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -96,10 +97,14 @@ public class PaymentService {
                 return new ProcessPaymentResult(cachedResponse, true);
             }
 
-            // NO TRANSACTION: Call external provider (LONG - 10s for sync, immediate for async)
+            // NO TRANSACTION: Call external provider with retry logic (LONG - 10s for sync, immediate for async)
             PaymentResponseDTO response;
             try {
-                response = externalPaymentProvider.charge(request, idempotencyKey);
+                // Execute payment with automatic retry (3 attempts with exponential backoff: 1s, 2s, 4s)
+                response = RetryUtil.executeWithRetry(
+                        () -> externalPaymentProvider.charge(request, idempotencyKey),
+                        RetryUtil.DEFAULT_RETRY_ATTEMPT
+                );
 
             } catch (PaymentException e) {
                 // Transaction 2: Update to FAILED (SHORT - 10ms)
