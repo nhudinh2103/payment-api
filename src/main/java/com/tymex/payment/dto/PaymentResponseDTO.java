@@ -18,7 +18,9 @@ public record PaymentResponseDTO(
     PaymentProvider paymentProvider,
     String providerTransactionId,
     String idempotencyKey,
-    boolean cached
+    boolean cached,
+    String error,
+    String message
 ) {
     /**
      * Factory method to create PaymentResponseDTO without optional fields.
@@ -51,7 +53,9 @@ public record PaymentResponseDTO(
             paymentProvider,
             null,  // providerTransactionId (null for sync providers)
             null,  // idempotencyKey
-            false  // Default to not cached
+            false,  // Default to not cached
+            null,   // error
+            null    // message
         );
     }
     
@@ -88,7 +92,9 @@ public record PaymentResponseDTO(
             paymentProvider,
             providerTransactionId,
             null,  // idempotencyKey
-            false  // Default to not cached
+            false,  // Default to not cached
+            null,   // error
+            null    // message
         );
     }
     
@@ -110,7 +116,45 @@ public record PaymentResponseDTO(
             paymentProvider,
             providerTransactionId,
             idempotencyKey,
-            cached
+            cached,
+            error,
+            message
+        );
+    }
+    
+    /**
+     * Factory method to create PaymentResponseDTO for failed payments.
+     * 
+     * @param amount the payment amount
+     * @param paymentMethod the payment method
+     * @param description the payment description
+     * @param createdAt the creation timestamp
+     * @param paymentProvider the payment provider used
+     * @param error the error code
+     * @param message the error message
+     * @return PaymentResponseDTO with status FAILED and error details
+     */
+    public static PaymentResponseDTO failed(
+            BigDecimal amount,
+            String paymentMethod,
+            String description,
+            LocalDateTime createdAt,
+            PaymentProvider paymentProvider,
+            String error,
+            String message) {
+        return new PaymentResponseDTO(
+            null,  // transactionNo (null for failed payments)
+            PaymentStatus.FAILED,
+            amount,
+            paymentMethod,
+            description,
+            createdAt,
+            paymentProvider,
+            null,  // providerTransactionId
+            null,  // idempotencyKey
+            false,  // cached
+            error,
+            message
         );
     }
 }

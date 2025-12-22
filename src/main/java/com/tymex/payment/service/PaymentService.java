@@ -4,6 +4,7 @@ import com.tymex.payment.dto.PaymentRequestDTO;
 import com.tymex.payment.dto.PaymentResponseDTO;
 import com.tymex.payment.entity.PaymentRequest;
 import com.tymex.payment.enums.ErrorCode;
+import com.tymex.payment.enums.PaymentProvider;
 import com.tymex.payment.enums.PaymentStatus;
 import com.tymex.payment.exception.IdempotencyKeyConflictException;
 import com.tymex.payment.exception.PaymentException;
@@ -107,9 +108,11 @@ public class PaymentService {
                 );
 
             } catch (PaymentException e) {
+                // Gracefully handle payment failure - return error response instead of throwing
                 // Transaction 2: Update to FAILED (SHORT - 10ms)
-                updateRecordFailed(record, e);
-                throw e;
+                PaymentResponseDTO errorResponse = createErrorResponse(e, request);
+                updateRecordFailed(record, errorResponse);
+                return new ProcessPaymentResult(errorResponse, false);
             }
 
             // Transaction 3: Update record based on response status
@@ -340,14 +343,27 @@ public class PaymentService {
             // COMMIT here - lock released in ~10ms!
         }
 
+        /**
+         * Creates an error response DTO for failed payments.
+         */
+        private PaymentResponseDTO createErrorResponse(PaymentException e, PaymentRequestDTO request) {
+            return PaymentResponseDTO.failed(
+                    request.amount(),
+                    request.paymentMethod(),
+                    request.description(),
+                    LocalDateTime.now(),
+                    request.paymentProvider(),
+                    ErrorCode.PAYMENT_FAILED.getCode(),
+                    e.getMessage()
+            );
+        }
+        
         @Transactional
-        private void updateRecordFailed(PaymentRequest record, PaymentException e) {
+        private void updateRecordFailed(PaymentRequest record, PaymentResponseDTO errorResponse) {
             record.setProcessingStatus(PaymentRequest.ProcessingStatus.FAILED);
-            record.setResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR.value());
-            // Create a simple error response JSON
-            String errorResponse = String.format("{\"error\":\"%s\",\"message\":\"%s\"}",
-                    ErrorCode.PAYMENT_FAILED.getCode(), e.getMessage());
-            record.setResponseBody(errorResponse);
+            record.setResponseStatus(HttpStatus.OK.value()); // 200 OK (gracefully handled)
+            record.setResponseBody(jsonSerializationService.serializeResponse(errorResponse));
+            record.setPaymentStatus(PaymentStatus.FAILED.getValue());
             repository.save(record); // UPDATE
             log.debug("Updated record to FAILED for idempotency key: {}", record.getIdempotencyKey());
             // COMMIT here - lock released in ~10ms!
@@ -449,17 +465,17 @@ public class PaymentService {
             } else if (status == PaymentStatus.FAILED) {
                 record.setProcessingStatus(PaymentRequest.ProcessingStatus.FAILED);
                 record.setPaymentStatus(PaymentStatus.FAILED.getValue());
-                record.setResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR.value());
+                record.setResponseStatus(HttpStatus.OK.value()); // 200 OK (gracefully handled)
                 
                 // Update response body with failure status
-                PaymentResponseDTO failedResponse = PaymentResponseDTO.of(
-                        null,
-                        PaymentStatus.FAILED,
+                PaymentResponseDTO failedResponse = PaymentResponseDTO.failed(
                         record.getAmount(),
                         record.getPaymentMethod(),
                         record.getDescription(),
                         LocalDateTime.now(),
-                        record.getPaymentProvider()
+                        record.getPaymentProvider(),
+                        ErrorCode.PAYMENT_FAILED.getCode(),
+                        "Payment processing failed"
                 );
                 record.setResponseBody(jsonSerializationService.serializeResponse(failedResponse));
                 

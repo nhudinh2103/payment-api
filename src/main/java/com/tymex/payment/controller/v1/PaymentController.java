@@ -5,7 +5,6 @@ import com.tymex.payment.dto.PaymentRequestDTO;
 import com.tymex.payment.dto.PaymentResponseDTO;
 import com.tymex.payment.enums.ErrorCode;
 import com.tymex.payment.exception.IdempotencyKeyConflictException;
-import com.tymex.payment.exception.PaymentException;
 import com.tymex.payment.exception.RequestInProgressException;
 import com.tymex.payment.service.PaymentService;
 import jakarta.validation.Valid;
@@ -65,15 +64,6 @@ public class PaymentController {
                 .status(HttpStatus.CONFLICT)
                 .body(ErrorResponseDTO.of(
                     ErrorCode.REQUEST_IN_PROGRESS,
-                    e.getMessage(),
-                    idempotencyKey
-                ));
-                
-        } catch (PaymentException e) {
-            return ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ErrorResponseDTO.of(
-                    ErrorCode.PAYMENT_FAILED,
                     e.getMessage(),
                     idempotencyKey
                 ));
