@@ -1,0 +1,21 @@
+{
+	"id": "payment-api-environment",
+	"name": "Payment API - Local",
+	"values": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "api_key",
+			"value": "your-secret-key-here",
+			"type": "secret",
+			"enabled": true
+		}
+	],
+	"_postman_variable_scope": "environment"
+}
+
+

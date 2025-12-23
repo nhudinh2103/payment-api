@@ -1,0 +1,330 @@
+{
+	"info": {
+		"_postman_id": "payment-api-collection",
+		"name": "Payment API",
+		"description": "Postman collection for Payment API testing - Happy Path scenarios",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Payments",
+			"item": [
+				{
+					"name": "Create Payment - STRIPE (Happy Path)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has transaction number\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('transactionNo');",
+									"});",
+									"",
+									"pm.test(\"Response has payment status\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('status');",
+									"});",
+									"",
+									"pm.test(\"Response has idempotency key\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('idempotencyKey');",
+									"});",
+									"",
+									"pm.test(\"Payment provider is STRIPE\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.paymentProvider).to.eql('STRIPE');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text"
+							},
+							{
+								"key": "Idempotency-Key",
+								"value": "{{$randomUUID}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"amount\": 100.50,\n    \"paymentMethod\": \"card\",\n    \"description\": \"Test payment via STRIPE\",\n    \"paymentProvider\": \"STRIPE\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/payments",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"payments"
+							]
+						},
+						"description": "Creates a payment using STRIPE provider. This is a synchronous payment that should return immediately with a transaction number."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Payment - MOMO (Happy Path)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has payment status\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('status');",
+									"});",
+									"",
+									"pm.test(\"Response has provider transaction ID\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('providerTransactionId');",
+									"});",
+									"",
+									"pm.test(\"Payment provider is MOMO\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.paymentProvider).to.eql('MOMO');",
+									"});",
+									"",
+									"pm.test(\"Status is PENDING for async payment\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData.status).to.eql('pending');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text"
+							},
+							{
+								"key": "Idempotency-Key",
+								"value": "{{$randomUUID}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"amount\": 250.75,\n    \"paymentMethod\": \"momo_wallet\",\n    \"description\": \"Test payment via MOMO\",\n    \"paymentProvider\": \"MOMO\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/payments",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"payments"
+							]
+						},
+						"description": "Creates a payment using MOMO provider. This is an asynchronous payment that returns a provider transaction ID and PENDING status. The actual payment status will be updated via webhook."
+					},
+					"response": []
+				},
+				{
+					"name": "Create Payment - Idempotency Test",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});",
+									"",
+									"pm.test(\"Response has cached property\", function () {",
+									"    var jsonData = pm.response.json();",
+									"    pm.expect(jsonData).to.have.property('cached');",
+									"});",
+									"",
+									"// Note: Run this request twice. First request: cached = false, Second request: cached = true",
+									"var jsonData = pm.response.json();",
+									"if (jsonData.cached === true) {",
+									"    pm.test(\"Response is cached (idempotent) - This is the second request\", function () {",
+									"        pm.expect(jsonData.cached).to.be.true;",
+									"    });",
+									"} else {",
+									"    pm.test(\"Response is not cached - This is the first request. Run again to test idempotency\", function () {",
+									"        pm.expect(jsonData.cached).to.be.false;",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"// Generate a fixed idempotency key for testing if not already set",
+									"if (!pm.environment.get('test_idempotency_key')) {",
+									"    // Generate a UUID-like string using timestamp and random number",
+									"    var timestamp = Date.now();",
+									"    var random = Math.floor(Math.random() * 1000000);",
+									"    pm.environment.set('test_idempotency_key', 'test-idempotency-' + timestamp + '-' + random);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-API-Key",
+								"value": "{{api_key}}",
+								"type": "text"
+							},
+							{
+								"key": "Idempotency-Key",
+								"value": "{{test_idempotency_key}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"amount\": 50.00,\n    \"paymentMethod\": \"card\",\n    \"description\": \"Idempotency test payment\",\n    \"paymentProvider\": \"STRIPE\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/payments",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"payments"
+							]
+						},
+						"description": "Tests idempotency by sending the same request twice with the same idempotency key. The second request should return a cached response."
+					},
+					"response": []
+				}
+			],
+			"description": "Payment creation endpoints"
+		},
+		{
+			"name": "Webhooks",
+			"item": [
+				{
+					"name": "MoMo Webhook - Success",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Status code is 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"transaction_id\": \"momo_txn_12345\",\n    \"transaction_no\": \"TXN67890\",\n    \"status\": \"SUCCEED\",\n    \"amount\": 250.75\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/webhooks/momo",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"webhooks",
+								"momo"
+							]
+						},
+						"description": "Simulates a MoMo webhook callback for a successful payment. Note: This requires a valid provider transaction ID that exists in the system."
+					},
+					"response": []
+				}
+			],
+			"description": "Webhook endpoints for payment providers"
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080",
+			"type": "string"
+		},
+		{
+			"key": "api_key",
+			"value": "your-secret-key-here",
+			"type": "string"
+		}
+	]
+}
+
