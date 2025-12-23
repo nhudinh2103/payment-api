@@ -5,14 +5,12 @@ import com.tymex.payment.dto.PaymentResponseDTO;
 import com.tymex.payment.entity.PaymentRequest;
 import com.tymex.payment.enums.ErrorCode;
 import com.tymex.payment.enums.PaymentStatus;
-import com.tymex.payment.exception.IdempotencyKeyConflictException;
 import com.tymex.payment.exception.PaymentException;
 import com.tymex.payment.exception.RequestInProgressException;
 import com.tymex.payment.repository.PaymentRequestRepository;
 import com.tymex.payment.service.provider.ExternalPaymentProvider;
 import com.tymex.payment.util.IdempotencyKeyValidator;
 import com.tymex.payment.util.RetryUtil;
-import org.apache.commons.codec.digest.DigestUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -82,12 +80,8 @@ public class PaymentService {
             // Validate idempotency key format (UUID v4)
             IdempotencyKeyValidator.validate(idempotencyKey);
 
-            // Serialize request and calculate hash
-            String requestBody = jsonSerializationService.serializeRequest(request);
-            String requestHash = DigestUtils.sha256Hex(requestBody);
-
             // Transaction 1: Create PENDING record (SHORT - 10ms)
-            PaymentRequest record = createPendingRecord(idempotencyKey, requestHash, requestBody, request);
+            PaymentRequest record = createPendingRecord(idempotencyKey, request);
 
             // Check if this is a cached response (record was already COMPLETED)
             boolean isCached = record.getProcessingStatus() == PaymentRequest.ProcessingStatus.COMPLETED;
@@ -139,15 +133,11 @@ public class PaymentService {
 
         @Transactional
         private PaymentRequest createPendingRecord(String idempotencyKey,
-                String requestHash,
-                String requestBody,
                 PaymentRequestDTO request) {
             try {
                 PaymentRequest record = new PaymentRequest();
                 record.setIdempotencyKey(idempotencyKey);
                 record.setProcessingStatus(PaymentRequest.ProcessingStatus.PROCESSING);
-                record.setRequestHash(requestHash);
-                record.setRequestBody(requestBody);
                 record.setAmount(request.amount());
                 record.setPaymentMethod(request.paymentMethod());
                 record.setDescription(request.description());
@@ -162,12 +152,12 @@ public class PaymentService {
             } catch (DataIntegrityViolationException e) {
                 // Key already exists, handle existing record
                 try {
-                    return handleExistingRecord(idempotencyKey, requestHash, request);
+                    return handleExistingRecord(idempotencyKey, request);
                 } catch (ObjectOptimisticLockingFailureException retryException) {
                     // All retries failed - fallback to read-only check
                     // Another thread might have updated the record to COMPLETED
                     log.info("handleExistingRecordReadOnly");
-                    return handleExistingRecordReadOnly(idempotencyKey, requestHash);
+                    return handleExistingRecordReadOnly(idempotencyKey);
                 }
             }
         }
@@ -179,19 +169,10 @@ public class PaymentService {
     )
     @Transactional
     private PaymentRequest handleExistingRecord(String idempotencyKey, 
-                                                String requestHash, 
                                                 PaymentRequestDTO request) {
         // First read: Check expiration and get initial state
-        PaymentRequestResetInfo existingWithReset = readAndCheckExpiration(idempotencyKey, requestHash, request);
+        PaymentRequestResetInfo existingWithReset = readAndCheckExpiration(idempotencyKey, request);
         PaymentRequest existing = existingWithReset.getRecord();
-        
-        // Validate request hash - must match regardless of expiration/reset status
-        if (!existing.getRequestHash().equals(requestHash)) {
-            throw new IdempotencyKeyConflictException(
-                "Idempotency key already used with different request body.",
-                idempotencyKey
-            );
-        }
 
         // If record was reset (expired and updated), return immediately
         // The record is already in PROCESSING status with updated fields, ready for processing
@@ -199,20 +180,12 @@ public class PaymentService {
             return existing;
         }
 
-        // Re-read to get fresh status after hash validation
+        // Re-read to get fresh status
         // Purpose: Catch concurrent status changes (e.g., PROCESSING → COMPLETED) that occurred
         // between the first read and this point. This avoids unnecessary optimistic lock exceptions
         // when another thread has already completed the payment.
-        existingWithReset = readAndCheckExpiration(idempotencyKey, requestHash, request);
+        existingWithReset = readAndCheckExpiration(idempotencyKey, request);
         existing = existingWithReset.getRecord();
-        
-        // Re-validate hash after re-read (defensive check - hash shouldn't change, but verify)
-        if (!existing.getRequestHash().equals(requestHash)) {
-            throw new IdempotencyKeyConflictException(
-                "Idempotency key already used with different request body.",
-                idempotencyKey
-            );
-        }
         
         // If record was reset during re-read (expired between initial check and re-read), return it
         if (existingWithReset.isReset()) {
@@ -234,8 +207,6 @@ public class PaymentService {
             case FAILED:
                 // Allow retry - reset to PROCESSING and process again
                 existing.setProcessingStatus(PaymentRequest.ProcessingStatus.PROCESSING);
-                existing.setRequestHash(requestHash);
-                existing.setRequestBody(jsonSerializationService.serializeRequest(request));
                 existing.setAmount(request.amount());
                 existing.setPaymentMethod(request.paymentMethod());
                 existing.setDescription(request.description());
@@ -249,7 +220,7 @@ public class PaymentService {
         }
     }
 
-        private PaymentRequestResetInfo readAndCheckExpiration(String idempotencyKey, String requestHash,
+        private PaymentRequestResetInfo readAndCheckExpiration(String idempotencyKey,
                 PaymentRequestDTO request) {
 
             PaymentRequest existing = repository.findByIdempotencyKey(idempotencyKey)
@@ -261,8 +232,6 @@ public class PaymentService {
                 // Instead of DELETE+INSERT (which causes recursion), UPDATE the existing record
                 // This avoids recursion and race conditions
                 existing.setProcessingStatus(PaymentRequest.ProcessingStatus.PROCESSING);
-                existing.setRequestHash(requestHash);
-                existing.setRequestBody(jsonSerializationService.serializeRequest(request));
                 existing.setAmount(request.amount());
                 existing.setPaymentMethod(request.paymentMethod());
                 existing.setDescription(request.description());
@@ -291,21 +260,13 @@ public class PaymentService {
          * return cached responses if the record is COMPLETED.
          * 
          * @param idempotencyKey the idempotency key
-         * @param requestHash    the request hash to validate
          * @return PaymentRequest if status allows, otherwise throws appropriate
          *         exception
          */
         @Transactional(readOnly = true)
-        private PaymentRequest handleExistingRecordReadOnly(String idempotencyKey, String requestHash) {
+        private PaymentRequest handleExistingRecordReadOnly(String idempotencyKey) {
             PaymentRequest existing = repository.findByIdempotencyKey(idempotencyKey)
                     .orElseThrow(() -> new IllegalStateException("Record should exist but not found"));
-
-            // Validate request hash
-            if (!existing.getRequestHash().equals(requestHash)) {
-                throw new IdempotencyKeyConflictException(
-                        "Idempotency key already used with different request body.",
-                        idempotencyKey);
-            }
 
             // Handle based on current status (read-only, no updates)
             switch (existing.getProcessingStatus()) {
@@ -428,13 +389,7 @@ public class PaymentService {
             
             String idempotencyKey = record.getIdempotencyKey();
             
-            // Step 2: Calculate webhook payload hash (for potential future validation)
-            // Note: Currently we rely on status check for idempotency, but hash is calculated
-            // for consistency with processPayment() pattern
-            String webhookHash = DigestUtils.sha256Hex(webhookPayload);
-            log.debug("Webhook hash calculated: idempotencyKey={}, hash={}", idempotencyKey, webhookHash);
-            
-            // Step 3 & 4: Check for existing record and validate duplicate webhooks
+            // Step 2 & 3: Check for existing record and validate duplicate webhooks
             // For webhooks, we validate that the payment is in PROCESSING status
             // If already COMPLETED/FAILED, this is a duplicate webhook
             if (record.getProcessingStatus() == PaymentRequest.ProcessingStatus.COMPLETED) {

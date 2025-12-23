@@ -4,7 +4,6 @@ import com.tymex.payment.dto.ErrorResponseDTO;
 import com.tymex.payment.dto.PaymentRequestDTO;
 import com.tymex.payment.dto.PaymentResponseDTO;
 import com.tymex.payment.enums.ErrorCode;
-import com.tymex.payment.exception.IdempotencyKeyConflictException;
 import com.tymex.payment.exception.RequestInProgressException;
 import com.tymex.payment.service.PaymentService;
 import jakarta.validation.Valid;
@@ -49,15 +48,6 @@ public class PaymentController {
             );
             
             return ResponseEntity.ok(response);
-            
-        } catch (IdempotencyKeyConflictException e) {
-            return ResponseEntity
-                .status(HttpStatus.CONFLICT)
-                .body(ErrorResponseDTO.of(
-                    ErrorCode.IDEMPOTENCY_KEY_CONFLICT,
-                    e.getMessage(),
-                    idempotencyKey
-                ));
                 
         } catch (RequestInProgressException e) {
             return ResponseEntity

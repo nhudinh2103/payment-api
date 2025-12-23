@@ -26,12 +26,6 @@ public class PaymentRequest {
     @Enumerated(EnumType.STRING)
     private ProcessingStatus processingStatus;
     
-    @Column(name = "request_hash", length = 64)
-    private String requestHash;
-    
-    @Column(name = "request_body", columnDefinition = "TEXT")
-    private String requestBody;
-    
     @Column(name = "response_status")
     private Integer responseStatus;
     
@@ -121,22 +115,6 @@ public class PaymentRequest {
     
     public void setProcessingStatus(ProcessingStatus processingStatus) {
         this.processingStatus = processingStatus;
-    }
-    
-    public String getRequestHash() {
-        return requestHash;
-    }
-    
-    public void setRequestHash(String requestHash) {
-        this.requestHash = requestHash;
-    }
-    
-    public String getRequestBody() {
-        return requestBody;
-    }
-    
-    public void setRequestBody(String requestBody) {
-        this.requestBody = requestBody;
     }
     
     public Integer getResponseStatus() {
