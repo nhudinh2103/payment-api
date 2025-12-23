@@ -2,13 +2,16 @@ package com.tymex.payment.service;
 
 import com.tymex.payment.dto.PaymentRequestDTO;
 import com.tymex.payment.dto.PaymentResponseDTO;
+import com.tymex.payment.dto.WebhookResult;
 import com.tymex.payment.entity.PaymentRequest;
 import com.tymex.payment.enums.ErrorCode;
+import com.tymex.payment.enums.PaymentProvider;
 import com.tymex.payment.enums.PaymentStatus;
 import com.tymex.payment.exception.PaymentException;
 import com.tymex.payment.exception.RequestInProgressException;
 import com.tymex.payment.repository.PaymentRequestRepository;
 import com.tymex.payment.service.provider.contract.PaymentProviderStrategy;
+import com.tymex.payment.service.provider.contract.WebhookCapablePaymentProviderStrategy;
 import com.tymex.payment.service.provider.routing.PaymentProviderRouter;
 import com.tymex.payment.util.IdempotencyKeyValidator;
 import com.tymex.payment.util.RetryUtil;
@@ -23,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 @Service
 public class PaymentService {
@@ -39,6 +43,39 @@ public class PaymentService {
         this.repository = repository;
         this.providerRouter = providerRouter;
         this.jsonSerializationService = jsonSerializationService;
+    }
+    
+    /**
+     * Processes webhook from payment provider.
+     * Handles routing, provider-specific handling, and processing in one place for consistency.
+     * 
+     * Flow:
+     * 1. Route to appropriate provider based on provider type
+     * 2. Provider handles webhook (parses according to provider-specific format)
+     * 3. Process webhook with idempotency logic
+     * 
+     * @param provider the payment provider (from path parameter)
+     * @param payload the webhook payload (JSON string)
+     * @param headers the webhook headers (for signature verification, etc.)
+     * @throws IllegalArgumentException if provider is not supported or webhook is invalid
+     */
+    public void processWebhook(PaymentProvider provider, String payload, Map<String, String> headers) {
+        // Route to webhook-capable provider
+        WebhookCapablePaymentProviderStrategy webhookHandler = providerRouter.routeWebhook(provider);
+        
+        // Provider handles webhook (provider-specific parsing)
+        WebhookResult webhookResult = webhookHandler.handleWebhook(payload, headers);
+        
+        log.info("Handled webhook from {}: providerTransactionId={}, status={}", 
+                 provider, webhookResult.providerTransactionId(), webhookResult.status());
+        
+        // Process webhook with idempotency logic
+        processWebhook(
+            webhookResult.providerTransactionId(),
+            webhookResult.payload(),
+            webhookResult.transactionNo(),
+            webhookResult.status()
+        );
     }
 
     public static class ProcessPaymentResult {

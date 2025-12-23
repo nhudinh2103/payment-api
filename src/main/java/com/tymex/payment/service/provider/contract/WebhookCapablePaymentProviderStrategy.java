@@ -1,5 +1,7 @@
 package com.tymex.payment.service.provider.contract;
 
+import com.tymex.payment.dto.WebhookResult;
+
 import java.util.Map;
 
 /**
@@ -9,26 +11,33 @@ import java.util.Map;
  * Only asynchronous providers (e.g., MoMo) implement this interface.
  * Synchronous providers (e.g., Stripe) do not implement this interface.
  * 
- * Clients that need webhook handling should depend on this interface,
- * not on PaymentProviderStrategy.
+ * Each provider implementation is responsible for:
+ * - Extracting provider_transaction_id from its own webhook payload format
+ * - Parsing the webhook payload according to its own schema
+ * - Returning parsed webhook data as WebhookResult
+ * 
+ * The controller coordinates between provider (handling) and service (processing)
+ * to avoid circular dependencies.
  */
 public interface WebhookCapablePaymentProviderStrategy {
     
     /**
-     * Handles webhook event from the provider.
+     * Handles webhook event from the provider by parsing it according to provider-specific format.
      * 
-     * For asynchronous providers (e.g., MoMo): Provider sends webhook to our endpoint with payment result.
-     * This method processes the webhook and updates the payment status.
+     * This method is responsible for provider-specific webhook handling:
+     * - Verifying webhook signature (if applicable)
+     * - Parsing webhook payload according to provider's schema
+     * - Extracting provider_transaction_id, transaction_no, and status
+     * - Converting provider-specific status to PaymentStatus enum
      * 
-     * Each provider implementation is responsible for:
-     * - Extracting provider_transaction_id from its own webhook payload format
-     * - Parsing the webhook payload according to its own schema
-     * - Calling PaymentService.processWebhook() with the extracted idempotency key
+     * Note: This method only handles parsing/preparation. The actual processing
+     * (idempotency, database updates) is handled by PaymentService.
      * 
      * @param payload the webhook payload (JSON string)
      * @param headers the webhook headers (for signature verification, etc.)
-     * @throws IllegalArgumentException if webhook is invalid or payment not found
+     * @return WebhookResult containing parsed webhook data ready for processing
+     * @throws IllegalArgumentException if webhook is invalid
      */
-    void handleWebhook(String payload, Map<String, String> headers);
+    WebhookResult handleWebhook(String payload, Map<String, String> headers);
 }
 

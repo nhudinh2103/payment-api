@@ -4,17 +4,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tymex.payment.dto.PaymentRequestDTO;
 import com.tymex.payment.dto.PaymentResponseDTO;
+import com.tymex.payment.dto.WebhookResult;
 import com.tymex.payment.enums.PaymentProvider;
 import com.tymex.payment.enums.PaymentStatus;
 import com.tymex.payment.exception.PaymentException;
-import com.tymex.payment.service.PaymentService;
 import com.tymex.payment.service.provider.contract.PaymentProviderStrategy;
 import com.tymex.payment.service.provider.contract.WebhookCapablePaymentProviderStrategy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -32,11 +30,9 @@ public class MoMoPaymentProvider implements PaymentProviderStrategy, WebhookCapa
     
     private static final Logger log = LoggerFactory.getLogger(MoMoPaymentProvider.class);
     private final ObjectMapper objectMapper;
-    private final PaymentService paymentService;
     
-    public MoMoPaymentProvider(ObjectMapper objectMapper, @Lazy PaymentService paymentService) {
+    public MoMoPaymentProvider(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
-        this.paymentService = paymentService;
     }
     
     @Override
@@ -80,10 +76,12 @@ public class MoMoPaymentProvider implements PaymentProviderStrategy, WebhookCapa
     }
     
     @Override
-    @Transactional
-    public void handleWebhook(String payload, Map<String, String> headers) {
+    public WebhookResult handleWebhook(String payload, Map<String, String> headers) {
         // Verify webhook signature (in real implementation)
         // verifyWebhookSignature(payload, headers);
+        
+        log.info("Parsing MoMo webhook: payload length={}, headers={}", 
+                 payload.length(), headers.keySet());
         
         // Parse webhook payload
         WebhookEvent webhookEvent = parseWebhookPayload(payload);
@@ -92,7 +90,7 @@ public class MoMoPaymentProvider implements PaymentProviderStrategy, WebhookCapa
         // MoMo uses "transaction_id" field in their webhook payload
         String providerTransactionId = webhookEvent.transactionId();
         
-        log.info("Processing MoMo webhook for providerTransactionId={}", providerTransactionId);
+        log.info("Parsed MoMo webhook for providerTransactionId={}", providerTransactionId);
         
         // Convert webhook status to PaymentStatus enum
         PaymentStatus paymentStatus;
@@ -101,21 +99,17 @@ public class MoMoPaymentProvider implements PaymentProviderStrategy, WebhookCapa
         } else if ("FAILED".equalsIgnoreCase(webhookEvent.status())) {
             paymentStatus = PaymentStatus.FAILED;
         } else {
-            log.warn("MoMo webhook: Unknown status '{}', ignoring webhook", webhookEvent.status());
-            return;
+            log.warn("MoMo webhook: Unknown status '{}', defaulting to FAILED", webhookEvent.status());
+            paymentStatus = PaymentStatus.FAILED;
         }
         
-        // Process webhook via PaymentService with idempotency logic (similar to processPayment)
-        // providerTransactionId is extracted from MoMo's webhook payload format ("transaction_id" field)
-        paymentService.processWebhook(
+        // Return parsed webhook data
+        return WebhookResult.of(
             providerTransactionId,  // provider_transaction_id (used to look up payment record)
-            payload,                // webhook payload for hash validation
             webhookEvent.transactionNo(),  // final transaction number (may be null if failed)
-            paymentStatus
+            paymentStatus,  // payment status (COMPLETED or FAILED)
+            payload  // original payload for hash validation
         );
-        
-        log.info("MoMo webhook processed successfully: providerTransactionId={}, status={}", 
-                 providerTransactionId, paymentStatus);
     }
     
     /**

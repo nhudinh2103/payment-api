@@ -3,8 +3,7 @@ package com.tymex.payment.controller.v1;
 import com.tymex.payment.dto.ErrorResponseDTO;
 import com.tymex.payment.enums.ErrorCode;
 import com.tymex.payment.enums.PaymentProvider;
-import com.tymex.payment.service.provider.contract.WebhookCapablePaymentProviderStrategy;
-import com.tymex.payment.service.provider.routing.PaymentProviderRouter;
+import com.tymex.payment.service.PaymentService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,58 +26,61 @@ public class WebhookController {
     
     private static final Logger log = LoggerFactory.getLogger(WebhookController.class);
     
-    private final PaymentProviderRouter providerRouter;
+    private final PaymentService paymentService;
     
-    public WebhookController(PaymentProviderRouter providerRouter) {
-        this.providerRouter = providerRouter;
+    public WebhookController(PaymentService paymentService) {
+        this.paymentService = paymentService;
     }
     
     /**
-     * Receives webhook from MoMo payment provider.
+     * Receives webhook from payment providers.
      * 
-     * Webhook format: {
-     *   "transaction_id": "<provider_transaction_id>",
-     *   "transaction_no": "<final_transaction_no>",
-     *   "status": "SUCCEED" (or "FAILED"),
-     *   ...
-     * }
+     * Webhook format varies by provider:
+     * - MoMo: { "transaction_id": "...", "transaction_no": "...", "status": "SUCCEED" }
+     * - Other providers may have different formats
      * 
+     * Flow:
+     * 1. Controller extracts provider from path parameter
+     * 2. Delegates to PaymentService which handles routing, parsing, and processing
+     * 
+     * @param provider the payment provider (from path parameter)
      * @param payload the webhook payload (JSON string)
      * @param request HTTP request (to read headers)
      * @return HTTP 200 OK if webhook processed successfully
      */
-    @PostMapping("/momo")
-    public ResponseEntity<?> handleMoMoWebhook(
+    @PostMapping("/{provider}")
+    public ResponseEntity<?> handleWebhook(
+            @PathVariable String provider,
             @RequestBody String payload,
             HttpServletRequest request) {
         try {
             // Extract headers
             Map<String, String> headers = extractHeaders(request);
             
-            log.info("Received MoMo webhook: payload length={}, headers={}", 
-                    payload.length(), headers.keySet());
+            // Parse provider enum from path parameter
+            PaymentProvider paymentProvider = PaymentProvider.fromString(provider);
             
-            // Route to webhook-capable provider (only async providers support webhooks)
-            // Each provider implementation is responsible for extracting provider_transaction_id
-            // from its own webhook payload format
-            WebhookCapablePaymentProviderStrategy webhookHandler = providerRouter.routeWebhook(PaymentProvider.MOMO);
+            log.info("Received webhook from {}: payload length={}, headers={}", 
+                    paymentProvider, payload.length(), headers.keySet());
             
-            // Process webhook - provider will extract idempotency key internally
-            webhookHandler.handleWebhook(payload, headers);
+            // Delegate to PaymentService - service handles routing, parsing, and processing
+            paymentService.processWebhook(paymentProvider, payload, headers);
+            
+            log.info("Webhook processed successfully: provider={}", paymentProvider);
             
             return ResponseEntity.ok().build();
             
         } catch (IllegalArgumentException e) {
-            log.warn("MoMo webhook validation failed: {}", e.getMessage());
+            log.warn("Webhook validation failed: {}", e.getMessage());
             return ResponseEntity
                     .status(HttpStatus.BAD_REQUEST)
                     .body(ErrorResponseDTO.of(
                             ErrorCode.BAD_REQUEST,
-                            "Invalid webhook payload: " + e.getMessage()
+                            "Invalid webhook: " + e.getMessage()
                     ));
                     
         } catch (Exception e) {
-            log.error("Error processing MoMo webhook", e);
+            log.error("Error processing webhook", e);
             return ResponseEntity
                     .status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ErrorResponseDTO.of(
