@@ -8,7 +8,8 @@ import com.tymex.payment.enums.PaymentStatus;
 import com.tymex.payment.exception.PaymentException;
 import com.tymex.payment.exception.RequestInProgressException;
 import com.tymex.payment.repository.PaymentRequestRepository;
-import com.tymex.payment.service.provider.ExternalPaymentProvider;
+import com.tymex.payment.service.provider.contract.PaymentProviderStrategy;
+import com.tymex.payment.service.provider.routing.PaymentProviderRouter;
 import com.tymex.payment.util.IdempotencyKeyValidator;
 import com.tymex.payment.util.RetryUtil;
 import org.slf4j.Logger;
@@ -29,14 +30,14 @@ public class PaymentService {
     private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
 
     private final PaymentRequestRepository repository;
-    private final ExternalPaymentProvider externalPaymentProvider;
+    private final PaymentProviderRouter providerRouter;
     private final JsonSerializationService jsonSerializationService;
 
     public PaymentService(PaymentRequestRepository repository,
-            ExternalPaymentProvider externalPaymentProvider,
+            PaymentProviderRouter providerRouter,
             JsonSerializationService jsonSerializationService) {
         this.repository = repository;
-        this.externalPaymentProvider = externalPaymentProvider;
+        this.providerRouter = providerRouter;
         this.jsonSerializationService = jsonSerializationService;
     }
 
@@ -92,11 +93,14 @@ public class PaymentService {
             }
 
             // NO TRANSACTION: Call external provider with retry logic (LONG - 10s for sync, immediate for async)
+            // Route to appropriate provider strategy (once, before retry loop)
+            PaymentProviderStrategy strategy = providerRouter.route(request.paymentProvider());
+            
             PaymentResponseDTO response;
             try {
                 // Execute payment with automatic retry (3 attempts with exponential backoff: 1s, 2s, 4s)
                 response = RetryUtil.executeWithRetry(
-                        () -> externalPaymentProvider.charge(request, idempotencyKey),
+                        () -> strategy.process(request, idempotencyKey),
                         RetryUtil.DEFAULT_RETRY_ATTEMPT
                 );
 

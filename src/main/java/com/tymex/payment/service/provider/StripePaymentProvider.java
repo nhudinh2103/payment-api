@@ -31,7 +31,7 @@ public class StripePaymentProvider implements PaymentProviderStrategy {
     }
     
     @Override
-    public PaymentResponseDTO initiatePayment(PaymentRequestDTO request, String idempotencyKey) {
+    public PaymentResponseDTO process(PaymentRequestDTO request, String idempotencyKey) {
         log.info("Processing payment via STRIPE: amount={}, method={}, idempotencyKey={}", 
                  request.amount(), request.paymentMethod(), idempotencyKey);
         

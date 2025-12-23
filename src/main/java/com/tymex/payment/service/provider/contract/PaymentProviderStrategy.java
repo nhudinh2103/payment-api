@@ -10,7 +10,7 @@ import com.tymex.payment.dto.PaymentResponseDTO;
 public interface PaymentProviderStrategy {
     
     /**
-     * Initiates payment with the provider.
+     * Processes payment with the external provider.
      * 
      * For synchronous providers (e.g., Stripe):
      * - Calls provider API and waits for response
@@ -26,6 +26,6 @@ public interface PaymentProviderStrategy {
      * @param idempotencyKey the idempotency key for this payment
      * @return PaymentResponseDTO with payment result (or PENDING for async providers)
      */
-    PaymentResponseDTO initiatePayment(PaymentRequestDTO request, String idempotencyKey);
+    PaymentResponseDTO process(PaymentRequestDTO request, String idempotencyKey);
 }
 

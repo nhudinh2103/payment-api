@@ -40,8 +40,8 @@ public class MoMoPaymentProvider implements PaymentProviderStrategy, WebhookCapa
     }
     
     @Override
-    public PaymentResponseDTO initiatePayment(PaymentRequestDTO request, String idempotencyKey) {
-        log.info("Initiating payment via MOMO: amount={}, method={}, idempotencyKey={}", 
+    public PaymentResponseDTO process(PaymentRequestDTO request, String idempotencyKey) {
+        log.info("Handling external provider MOMO: amount={}, method={}, idempotencyKey={}", 
                  request.amount(), request.paymentMethod(), idempotencyKey);
         
         // Simulate payment processing validation
@@ -58,7 +58,7 @@ public class MoMoPaymentProvider implements PaymentProviderStrategy, WebhookCapa
         
         // Store provider transaction ID and webhook URL for later webhook processing
         // In real implementation: Store in database for webhook lookup
-        log.info("MoMo payment initiated: providerTransactionId={}, webhookUrl={}", 
+        log.info("MoMo external provider handled: providerTransactionId={}, webhookUrl={}", 
                  providerResponse.transactionId(), providerResponse.webhookUrl());
         
         // Return PENDING response immediately (no transactionNo yet)
@@ -74,7 +74,7 @@ public class MoMoPaymentProvider implements PaymentProviderStrategy, WebhookCapa
             providerResponse.transactionId()  // Store provider transaction ID for webhook lookup
         );
         
-        log.info("MoMo payment initiated successfully: status=PENDING, providerTransactionId={}", 
+        log.info("MoMo external provider handled successfully: status=PENDING, providerTransactionId={}", 
                  providerResponse.transactionId());
         return response;
     }
