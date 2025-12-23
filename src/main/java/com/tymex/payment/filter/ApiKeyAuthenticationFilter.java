@@ -1,6 +1,8 @@
 package com.tymex.payment.filter;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tymex.payment.config.PaymentProperties;
+import com.tymex.payment.dto.ErrorResponseDTO;
 import com.tymex.payment.enums.ErrorCode;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -17,9 +19,11 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
     private static final String API_KEY_HEADER = "X-API-Key";
     
     private final PaymentProperties paymentProperties;
+    private final ObjectMapper objectMapper;
     
-    public ApiKeyAuthenticationFilter(PaymentProperties paymentProperties) {
+    public ApiKeyAuthenticationFilter(PaymentProperties paymentProperties, ObjectMapper objectMapper) {
         this.paymentProperties = paymentProperties;
+        this.objectMapper = objectMapper;
     }
     
     @Override
@@ -28,17 +32,32 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                                    FilterChain filterChain) 
             throws ServletException, IOException {
         
-        String apiKey = request.getHeader(API_KEY_HEADER);
         String expectedKey = paymentProperties.getApi().getKey();
+
+        
+        // Reject all requests if API key is not configured (null, empty, blank, or unresolved placeholder)
+        boolean isUnresolvedPlaceholder = expectedKey != null && expectedKey.startsWith("${") && expectedKey.endsWith("}");
+        if (expectedKey == null || expectedKey.isBlank() || isUnresolvedPlaceholder) {
+            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            response.setContentType("application/json");
+            ErrorResponseDTO errorResponse = ErrorResponseDTO.of(
+                ErrorCode.UNAUTHORIZED,
+                "API key is not configured. Please set API_KEY environment variable."
+            );
+            response.getWriter().write(objectMapper.writeValueAsString(errorResponse));
+            return;
+        }
+        
+        String apiKey = request.getHeader(API_KEY_HEADER);
         
         if (apiKey == null || !apiKey.equals(expectedKey)) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType("application/json");
-            String errorJson = String.format(
-                "{\"error\":\"%s\",\"message\":\"Invalid or missing API key\"}",
-                ErrorCode.UNAUTHORIZED.getCode()
+            ErrorResponseDTO errorResponse = ErrorResponseDTO.of(
+                ErrorCode.UNAUTHORIZED,
+                "Invalid or missing API key"
             );
-            response.getWriter().write(errorJson);
+            response.getWriter().write(objectMapper.writeValueAsString(errorResponse));
             return;
         }
         

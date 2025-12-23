@@ -76,7 +76,7 @@ public class StripePaymentProvider implements PaymentProviderStrategy {
     private String simulateProviderApiCall(PaymentRequestDTO request) {
         // Simulate external API call delay (10 seconds as mentioned in requirements)
         try {
-            Thread.sleep(10000);
+            Thread.sleep(30000);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new PaymentException("Payment processing interrupted");

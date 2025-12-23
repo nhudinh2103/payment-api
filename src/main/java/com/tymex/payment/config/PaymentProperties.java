@@ -1,11 +1,20 @@
 package com.tymex.payment.config;
 
+import jakarta.annotation.PostConstruct;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
+import org.springframework.validation.annotation.Validated;
 
 @Component
+@Validated
 @ConfigurationProperties(prefix = "payment")
 public class PaymentProperties {
+    
+    private static final Logger log = LoggerFactory.getLogger(PaymentProperties.class);
     
     private Api api = new Api();
     private Idempotency idempotency = new Idempotency();
@@ -44,7 +53,40 @@ public class PaymentProperties {
         this.apiVersion = apiVersion;
     }
     
+    @PostConstruct
+    public void validateApiKey() {
+        String apiKey = api.getKey();
+        
+        // Log the raw value for debugging (masked for security)
+        if (apiKey != null && !apiKey.startsWith("${")) {
+            String maskedKey = apiKey.length() > 4 
+                ? apiKey.substring(0, 2) + "***" + apiKey.substring(apiKey.length() - 2)
+                : "***";
+            log.info("API key loaded successfully (masked: {})", maskedKey);
+        } else {
+            log.warn("API key value: {}", apiKey);
+        }
+        
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException(
+                "API key is not configured. Please set API_KEY environment variable.\n" +
+                "Example: export API_KEY=your-secret-key-here"
+            );
+        }
+        // Check if Spring Boot failed to resolve the placeholder
+        if (apiKey.startsWith("${") && apiKey.endsWith("}")) {
+            throw new IllegalStateException(
+                "API key placeholder was not resolved. Please ensure API_KEY environment variable is set.\n" +
+                "Current value: " + apiKey + "\n" +
+                "To set it in Linux: export API_KEY=your-secret-key-here\n" +
+                "Then restart the application."
+            );
+        }
+    }
+    
+    @Valid
     public static class Api {
+        @NotBlank(message = "API key must be provided via API_KEY environment variable")
         private String key;
         
         public String getKey() {

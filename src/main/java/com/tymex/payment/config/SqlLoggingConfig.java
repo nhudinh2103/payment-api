@@ -41,6 +41,12 @@ public class SqlLoggingConfig {
         ch.qos.logback.classic.Logger hibernateTypeLogger = loggerContext.getLogger("org.hibernate.type.descriptor.sql.BasicBinder");
         hibernateTypeLogger.setLevel(sqlLoggingEnabled ? Level.TRACE : Level.INFO);
         
+        // Suppress SQL exception logging for expected constraint violations
+        // DataIntegrityViolationException is caught and handled as part of normal flow (idempotency check)
+        // Setting to OFF completely suppresses these expected constraint violation logs
+        ch.qos.logback.classic.Logger sqlExceptionLogger = loggerContext.getLogger("org.hibernate.engine.jdbc.spi.SqlExceptionHelper");
+        sqlExceptionLogger.setLevel(Level.OFF); // Completely suppress expected constraint violation logs
+        
         if (sqlLoggingEnabled) {
             log.info("SQL logging enabled - All SQL statements and parameters will be logged");
         } else {

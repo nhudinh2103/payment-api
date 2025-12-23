@@ -4,7 +4,6 @@ import com.tymex.payment.dto.PaymentRequestDTO;
 import com.tymex.payment.dto.PaymentResponseDTO;
 import com.tymex.payment.entity.PaymentRequest;
 import com.tymex.payment.enums.ErrorCode;
-import com.tymex.payment.enums.PaymentProvider;
 import com.tymex.payment.enums.PaymentStatus;
 import com.tymex.payment.exception.IdempotencyKeyConflictException;
 import com.tymex.payment.exception.PaymentException;
@@ -107,10 +106,19 @@ public class PaymentService {
                         RetryUtil.DEFAULT_RETRY_ATTEMPT
                 );
 
-            } catch (PaymentException e) {
+            } catch (Exception e) {
+                // Handle payment failure - RetryUtil throws Exception, but we expect PaymentException
+                PaymentException paymentException;
+                if (e instanceof PaymentException) {
+                    paymentException = (PaymentException) e;
+                } else {
+                    // Wrap unexpected exceptions as PaymentException
+                    paymentException = new PaymentException("Payment processing failed: " + e.getMessage(), e);
+                }
+                
                 // Gracefully handle payment failure - return error response instead of throwing
                 // Transaction 2: Update to FAILED (SHORT - 10ms)
-                PaymentResponseDTO errorResponse = createErrorResponse(e, request);
+                PaymentResponseDTO errorResponse = createErrorResponse(paymentException, request);
                 updateRecordFailed(record, errorResponse);
                 return new ProcessPaymentResult(errorResponse, false);
             }
@@ -158,6 +166,7 @@ public class PaymentService {
                 } catch (ObjectOptimisticLockingFailureException retryException) {
                     // All retries failed - fallback to read-only check
                     // Another thread might have updated the record to COMPLETED
+                    log.info("handleExistingRecordReadOnly");
                     return handleExistingRecordReadOnly(idempotencyKey, requestHash);
                 }
             }
@@ -172,12 +181,11 @@ public class PaymentService {
     private PaymentRequest handleExistingRecord(String idempotencyKey, 
                                                 String requestHash, 
                                                 PaymentRequestDTO request) {
-
+        // First read: Check expiration and get initial state
         PaymentRequestResetInfo existingWithReset = readAndCheckExpiration(idempotencyKey, requestHash, request);
         PaymentRequest existing = existingWithReset.getRecord();
         
-        // Validate request hash (even if record was reset, we should validate)
-        // This ensures we catch any hash mismatches before proceeding
+        // Validate request hash - must match regardless of expiration/reset status
         if (!existing.getRequestHash().equals(requestHash)) {
             throw new IdempotencyKeyConflictException(
                 "Idempotency key already used with different request body.",
@@ -185,25 +193,33 @@ public class PaymentService {
             );
         }
 
-        // If record was reset (expired and updated), return it immediately to allow processing to continue
-        // The record is already in PROCESSING status with updated fields
+        // If record was reset (expired and updated), return immediately
+        // The record is already in PROCESSING status with updated fields, ready for processing
         if (existingWithReset.isReset()) {
             return existing;
         }
 
-        // Re-read only if NOT reset (to get fresh data in case of concurrent updates)
-        // This ensures we get the latest status, especially if another thread just completed
-        // the payment between our initial read and this status check
+        // Re-read to get fresh status after hash validation
+        // Purpose: Catch concurrent status changes (e.g., PROCESSING → COMPLETED) that occurred
+        // between the first read and this point. This avoids unnecessary optimistic lock exceptions
+        // when another thread has already completed the payment.
         existingWithReset = readAndCheckExpiration(idempotencyKey, requestHash, request);
         existing = existingWithReset.getRecord();
         
-        // If record was reset after re-read (expired between initial check and re-read), return it
-        // This handles the case where record became expired between initial check and re-read
+        // Re-validate hash after re-read (defensive check - hash shouldn't change, but verify)
+        if (!existing.getRequestHash().equals(requestHash)) {
+            throw new IdempotencyKeyConflictException(
+                "Idempotency key already used with different request body.",
+                idempotencyKey
+            );
+        }
+        
+        // If record was reset during re-read (expired between initial check and re-read), return it
         if (existingWithReset.isReset()) {
             return existing;
         }
-        
-        // Handle based on status (using fresh data)
+
+        // Handle based on current status (using fresh data from re-read)
         switch (existing.getProcessingStatus()) {
             case PROCESSING:
                 throw new RequestInProgressException(
@@ -212,12 +228,11 @@ public class PaymentService {
                 );
                 
             case COMPLETED:
-                // Return cached response - no need to process again
-                // The record is already COMPLETED, so we'll return it as-is
+                // Return cached response - payment already completed by another thread
                 return existing;
                 
             case FAILED:
-                // Allow retry - update to PROCESSING and process again
+                // Allow retry - reset to PROCESSING and process again
                 existing.setProcessingStatus(PaymentRequest.ProcessingStatus.PROCESSING);
                 existing.setRequestHash(requestHash);
                 existing.setRequestBody(jsonSerializationService.serializeRequest(request));

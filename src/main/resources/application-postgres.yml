@@ -16,3 +16,10 @@ spring:
           query_timeout: 30
         format_sql: ${payment.debug.sql-logging:false}
 
+logging:
+  level:
+    # Suppress Hibernate SQL exception logging for expected constraint violations
+    # DataIntegrityViolationException is caught and handled as part of normal flow
+    # Note: SqlLoggingConfig also sets this to OFF programmatically
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: OFF
+
